@@ -203,6 +203,54 @@ st.dataframe(df_elast, use_container_width=True, hide_index=True)
 st.markdown("---")
 
 # =========================================================
+# IMPORTANCIA RELATIVA DE ATRIBUTOS
+# =========================================================
+st.subheader("⚖️ Importancia relativa de los atributos")
+st.caption("Cuánto pesa cada atributo en la decisión del fan, repartiendo el 100% según el "
+           "rango de utilidad de cada uno (modelo completo, con opción de no-compra).")
+
+def importancia_relativa():
+    rango_zona = (max(0, BETAS['B_VIP'], BETAS['B_PREMIUM'], BETAS['B_ESTANDAR'])
+                  - min(0, BETAS['B_VIP'], BETAS['B_PREMIUM'], BETAS['B_ESTANDAR']))
+    rango_precio = abs(BETAS['B_PRECIO'] * (49 / 1000.0) - BETAS['B_PRECIO'] * (4999 / 1000.0))
+    rango_rival = (max(0, BETAS['B_RIVAL_LAKERS'], BETAS['B_RIVAL_HUSTLE'])
+                   - min(0, BETAS['B_RIVAL_LAKERS'], BETAS['B_RIVAL_HUSTLE']))
+    rango_dia = abs(BETAS['B_DIA_FINDE'])
+    rango_fb = abs(BETAS['B_FB'])
+    rangos = {'Precio': rango_precio, 'Zona': rango_zona, 'Rival': rango_rival,
+              'Paquete F&B': rango_fb, 'Día': rango_dia}
+    total = sum(rangos.values())
+    return {k: v / total * 100 for k, v in rangos.items()}
+
+imp = importancia_relativa()
+imp_orden = sorted(imp.items(), key=lambda x: -x[1])
+
+col_imp1, col_imp2 = st.columns([1.1, 1])
+with col_imp1:
+    df_imp = pd.DataFrame({
+        'Atributo': [k for k, _ in imp_orden],
+        'Importancia': [f"{v:.1f}%" for _, v in imp_orden],
+        'Significativo (95%)': ['Sí' if k in ('Precio', 'Zona') else 'No'
+                                for k, _ in imp_orden],
+    })
+    st.dataframe(df_imp, use_container_width=True, hide_index=True)
+with col_imp2:
+    df_imp_chart = pd.DataFrame(
+        {'Importancia (%)': [v for _, v in imp_orden]},
+        index=[k for k, _ in imp_orden],
+    )
+    st.bar_chart(df_imp_chart, use_container_width=True)
+
+st.info(
+    "📌 **Cómo leerlo:** Precio y Zona explican juntos cerca del **87%** de la decisión. "
+    "El peso del Precio está influido por el amplio rango evaluado en la encuesta "
+    "($49–$4,999): la importancia relativa siempre es **condicional a los rangos probados**, "
+    "no una verdad absoluta."
+)
+
+st.markdown("---")
+
+# =========================================================
 # MATRIZ DE PRECIOS
 # =========================================================
 st.subheader("🧮 Matriz de precios — combinaciones óptimas")
