@@ -5,145 +5,162 @@ import itertools
 import altair as alt
 
 # =========================================================
-# SIMULADOR DE PRICING - CAPITANES CDMX
-# Modelo: Choice-Based Conjoint + Logit (medias poblacionales)
-# estimado en Biogeme. TODOS los betas provienen del modelo real
-# HB_Capitanes_Real_4Zonas. No hay parametros inventados.
+# SIMULADOR DE PRICING — CAPITANES CDMX
+# Modelo: Choice-Based Conjoint estimado en Biogeme
+# (HB_Capitanes_Ampliado, medias poblacionales).
+# Dataset definitivo: 1,170 elecciones. TODOS los betas son reales.
+# Variables marcadas con su significancia estadistica (95%).
 # =========================================================
 
 st.set_page_config(page_title="Capitanes CDMX Pricing", layout="wide", page_icon="🏀")
 
 st.title("🏀 Capitanes CDMX — Simulador de Pricing")
 st.markdown("""
-Herramienta de simulación de demanda e ingresos de taquilla para la Arena CDMX.
-Basada en un modelo **Choice-Based Conjoint estimado en Biogeme** (medias poblacionales).
-Todos los coeficientes provienen del modelo real; los precios simulados se mantienen
-dentro del rango evaluado en la encuesta.
+Simulador de demanda e ingresos de taquilla para la Arena CDMX, basado en un modelo
+**Choice-Based Conjoint estimado en Biogeme**. Todos los coeficientes provienen del modelo real;
+cada atributo está marcado con su **significancia estadística** al 95%.
 """)
 
 # ---------------------------------------------------------
-# BETAS REALES estimados en Biogeme (modelo HB_Capitanes_Real_4Zonas)
-# Escala: el precio entra dividido entre 1000 (igual que en la estimacion).
-# La zona Economica es la base (utilidad de zona = 0).
-# Solo se usan las MEDIAS (MU): los SIGMA no convergieron con 1000 draws,
-# por lo que la heterogeneidad individual NO se modela (queda como trabajo futuro).
+# BETAS REALES — modelo HB_Capitanes_Ampliado (1,170 elecciones)
+# Escala: precio dividido entre 1000. Zona base = Económica.
+# Rival base = Austin Spurs. Día base = Lun–Jue. F&B solo en VIP/Premium.
 # ---------------------------------------------------------
 BETAS = {
-    'B_VIP':      0.3655631700557071,
-    'B_PREMIUM':  0.3494199836399673,
-    'B_ESTANDAR': 0.8921894078121936,
-    'B_PRECIO':  -0.5406648384012817,   # por cada $1,000 MXN
-    'B_RIVAL_TOP':0.26153827558027254,
-    'ASC_NINGUNO':-1.0402528716651978,
+    'B_VIP':           0.21835811950929115,
+    'B_PREMIUM':       0.18473681471448933,
+    'B_ESTANDAR':      0.8464164862496442,
+    'B_PRECIO':       -0.5190885553010625,
+    'B_RIVAL_LAKERS':  0.2342081604588969,
+    'B_RIVAL_HUSTLE':  0.039138129439401474,
+    'B_DIA_FINDE':     0.031126454169117863,
+    'B_FB':            0.23008637722174097,
+    'ASC_NINGUNO':    -1.0367189600656634,
 }
 
-# Ajuste de modelo (para reportar honestamente)
-MODELO_INFO = {
-    'accuracy': 45.61,
-    'n_obs': 1116,
-    'rho2_nota': "Accuracy holdout 45.6% (azar con 4 opciones = 25%)",
+# Significancia (p-valores robustos). True = significativo al 95%.
+SIGNIF = {
+    'Precio':     (0.00002, True),
+    'Estándar':   (0.00008, True),
+    'No-compra':  (0.00006, True),
+    'Lakers':     (0.113,   False),
+    'F&B':        (0.177,   False),
+    'Premium':    (0.539,   False),
+    'VIP':        (0.639,   False),
+    'Día finde':  (0.823,   False),
+    'Hustle':     (0.751,   False),
 }
 
-# ---------------------------------------------------------
-# Inventario real de la Arena CDMX (18,037 asientos)
-# Mapeo de las 7 zonas comerciales a las 4 zonas del modelo.
-# ---------------------------------------------------------
+# Inventario real Arena CDMX (18,037)
 CAPACIDAD = {'VIP': 1732, 'Premium': 3556, 'Estándar': 6373, 'Económica': 6376}
-TOTAL_ASIENTOS = sum(CAPACIDAD.values())  # 18,037
+TOTAL_ASIENTOS = sum(CAPACIDAD.values())
 
-# Rangos de precio EVALUADOS EN LA ENCUESTA (zona segura, no extrapolar)
+# Rangos de precio evaluados en la encuesta (zona segura)
 RANGOS = {
-    'VIP':       (2499, 4999),
-    'Premium':   (1499, 3499),
-    'Estándar':  (349, 799),
-    'Económica': (49, 299),
+    'VIP': (2499, 4999), 'Premium': (1499, 3499),
+    'Estándar': (349, 799), 'Económica': (49, 299),
 }
 
 # =========================================================
-# MOTOR: Logit multinomial con los betas reales. Sin factores de escala.
+# MOTOR — Logit con betas reales, sin factores de ajuste
 # =========================================================
-def utilidades(p_vip, p_prem, p_est, p_econ, rival_top):
-    bp = BETAS['B_PRECIO']
-    r = BETAS['B_RIVAL_TOP'] * rival_top
-    V_vip  = BETAS['B_VIP']      + bp * (p_vip  / 1000.0) + r
-    V_prem = BETAS['B_PREMIUM']  + bp * (p_prem / 1000.0) + r
-    V_est  = BETAS['B_ESTANDAR'] + bp * (p_est  / 1000.0) + r
-    V_econ =                       bp * (p_econ / 1000.0) + r   # zona base
-    V_none = BETAS['ASC_NINGUNO']
-    return np.array([V_vip, V_prem, V_est, V_econ, V_none])
+def _efecto_rival(rival):
+    # 0 = Austin Spurs (base), 1 = Southbay Lakers, 2 = Memphis Hustle
+    if rival == 1:
+        return BETAS['B_RIVAL_LAKERS']
+    if rival == 2:
+        return BETAS['B_RIVAL_HUSTLE']
+    return 0.0
 
-def simular(p_vip, p_prem, p_est, p_econ, rival_top):
-    V = utilidades(p_vip, p_prem, p_est, p_econ, rival_top)
-    exp_v = np.exp(V)
-    probs = exp_v / exp_v.sum()
+def simular(p_vip, p_prem, p_est, p_econ, rival, finde, fb_on):
+    bp = BETAS['B_PRECIO']
+    r = _efecto_rival(rival)
+    dia = BETAS['B_DIA_FINDE'] * finde
+    fb = BETAS['B_FB'] * fb_on          # F&B solo se suma a VIP y Premium
+    V = np.array([
+        BETAS['B_VIP']      + bp * (p_vip  / 1000.0) + r + dia + fb,
+        BETAS['B_PREMIUM']  + bp * (p_prem / 1000.0) + r + dia + fb,
+        BETAS['B_ESTANDAR'] + bp * (p_est  / 1000.0) + r + dia,
+        bp * (p_econ / 1000.0) + r + dia,             # Económica (base)
+        BETAS['ASC_NINGUNO'],
+    ])
+    probs = np.exp(V) / np.exp(V).sum()
     zonas = ['VIP', 'Premium', 'Estándar', 'Económica', 'No compra']
     cuotas = dict(zip(zonas, probs))
 
-    # Demanda teorica -> topada por capacidad fisica de cada zona
     precios = {'VIP': p_vip, 'Premium': p_prem, 'Estándar': p_est, 'Económica': p_econ}
-    asistencia = {}
-    for z in ['VIP', 'Premium', 'Estándar', 'Económica']:
-        deseo = int(cuotas[z] * TOTAL_ASIENTOS)
-        asistencia[z] = min(deseo, CAPACIDAD[z])
-
+    asistencia = {z: min(int(cuotas[z] * TOTAL_ASIENTOS), CAPACIDAD[z]) for z in CAPACIDAD}
     asist_total = sum(asistencia.values())
     no_asisten = TOTAL_ASIENTOS - asist_total
-    ingreso = sum(asistencia[z] * precios[z] for z in asistencia)
+    ingreso = sum(asistencia[z] * precios[z] for z in CAPACIDAD)
 
-    # Cuotas REALES sobre aforo (lo que de verdad se vende; el sobrante va a "no asiste")
-    cuotas_reales = {z: asistencia[z] / TOTAL_ASIENTOS * 100 for z in asistencia}
+    cuotas_reales = {z: asistencia[z] / TOTAL_ASIENTOS * 100 for z in CAPACIDAD}
     cuotas_reales['No asiste / sin cupo'] = no_asisten / TOTAL_ASIENTOS * 100
 
-    # Elasticidad-precio propia (formula Logit): beta_precio * (precio/1000) * (1 - P)
-    elasticidades = {}
-    for z in ['VIP', 'Premium', 'Estándar', 'Económica']:
-        elasticidades[z] = BETAS['B_PRECIO'] * (precios[z] / 1000.0) * (1 - cuotas[z])
-
+    elasticidades = {z: BETAS['B_PRECIO'] * (precios[z] / 1000.0) * (1 - cuotas[z]) for z in CAPACIDAD}
     return cuotas, cuotas_reales, asistencia, asist_total, no_asisten, ingreso, elasticidades
 
 # =========================================================
 # SIDEBAR
 # =========================================================
 st.sidebar.header("⚙️ Escenario del partido")
-rival = st.sidebar.radio("Tipo de rival", ["Rival Top (alta convocatoria)", "Rival regular"])
-rival_top = 1 if "Top" in rival else 0
 
-st.sidebar.caption("ℹ️ El modelo estimó el efecto del rival como Top vs. No-Top. "
-                   "Día de la semana y paquetes de alimentos NO se estimaron y no se incluyen.")
+rival_lbl = st.sidebar.selectbox(
+    "Rival",
+    ["Austin Spurs (base)", "Southbay Lakers", "Memphis Hustle"],
+)
+rival = {"Austin Spurs (base)": 0, "Southbay Lakers": 1, "Memphis Hustle": 2}[rival_lbl]
 
+dia_lbl = st.sidebar.radio("Día", ["Entre semana (Lun–Jue)", "Fin de semana (Vie–Dom)"])
+finde = 1 if "Fin" in dia_lbl else 0
+
+fb_lbl = st.sidebar.radio("Paquete de alimentos y bebidas", ["Sin paquete", "Con paquete F&B"])
+fb_on = 1 if "Con" in fb_lbl else 0
+st.sidebar.caption("ℹ️ El paquete F&B solo aplica a VIP y Premium (así se diseñó la encuesta).")
+
+st.sidebar.markdown("---")
 st.sidebar.header("💵 Precios por zona (MXN)")
-st.sidebar.caption("Los rangos corresponden a lo evaluado en la encuesta.")
+st.sidebar.caption("Rangos = lo evaluado en la encuesta.")
 p_vip  = st.sidebar.slider("VIP",       *RANGOS['VIP'],       3800, step=100)
 p_prem = st.sidebar.slider("Premium",   *RANGOS['Premium'],   2400, step=50)
 p_est  = st.sidebar.slider("Estándar",  *RANGOS['Estándar'],  580,  step=20)
 p_econ = st.sidebar.slider("Económica", *RANGOS['Económica'], 180,  step=10)
 
 (cuotas, cuotas_reales, asistencia, asist_total,
- no_asisten, ingreso, elasticidades) = simular(p_vip, p_prem, p_est, p_econ, rival_top)
+ no_asisten, ingreso, elasticidades) = simular(p_vip, p_prem, p_est, p_econ, rival, finde, fb_on)
 
 # =========================================================
-# PANEL DE INDICADORES
+# AVISO DE SIGNIFICANCIA (opción 1)
+# =========================================================
+st.info(
+    "📌 **Lectura estadística:** en el modelo, solo el **Precio** y la **zona Estándar** "
+    "resultaron significativos al 95%. El rival, el día y el paquete F&B se incluyen como "
+    "**controles exploratorios** (no significativos en la muestra actual). Sus efectos se "
+    "muestran, pero deben interpretarse con cautela."
+)
+
+# =========================================================
+# INDICADORES
 # =========================================================
 c1, c2, c3 = st.columns(3)
 c1.metric("💰 Ingreso de taquilla", f"${ingreso/1e6:.2f}M MXN")
 c2.metric("👥 Asistencia", f"{asist_total:,} / {TOTAL_ASIENTOS:,}",
-          f"{asist_total/TOTAL_ASIENTOS*100:.1f}% de ocupación")
+          f"{asist_total/TOTAL_ASIENTOS*100:.1f}% ocupación")
 c3.metric("📉 No asiste / sin cupo", f"{no_asisten:,} fans")
 
 st.markdown("---")
 
 # =========================================================
-# GRAFICA 1: Ocupacion fisica vs capacidad (barras agrupadas, compactas)
+# GRÁFICA 1 — ocupación física vs capacidad
 # =========================================================
 st.subheader("🏟️ Ocupación física por zona")
 df_oc = pd.DataFrame({
     'Zona': ['VIP', 'Premium', 'Estándar', 'Económica'],
     'Asientos vendidos': [asistencia[z] for z in ['VIP','Premium','Estándar','Económica']],
     'Capacidad máxima':  [CAPACIDAD[z]  for z in ['VIP','Premium','Estándar','Económica']],
-})
-df_oc_long = df_oc.melt(id_vars='Zona', var_name='Métrica', value_name='Asientos')
+}).melt(id_vars='Zona', var_name='Métrica', value_name='Asientos')
 
-chart_oc = alt.Chart(df_oc_long).mark_bar().encode(
+chart_oc = alt.Chart(df_oc).mark_bar().encode(
     x=alt.X('Métrica:N', title=None, axis=alt.Axis(labels=False, ticks=False)),
     y=alt.Y('Asientos:Q', title='Asientos'),
     color=alt.Color('Métrica:N',
@@ -157,7 +174,7 @@ st.altair_chart(chart_oc, use_container_width=False)
 st.markdown("---")
 
 # =========================================================
-# GRAFICA 2: Participacion de mercado (cuotas reales)
+# GRÁFICA 2 — distribución de demanda
 # =========================================================
 st.subheader("📊 Distribución de la demanda (%)")
 df_cuotas = pd.DataFrame({
@@ -169,12 +186,11 @@ st.bar_chart(df_cuotas, use_container_width=True)
 st.markdown("---")
 
 # =========================================================
-# ELASTICIDAD-PRECIO (derivada del beta real)
+# ELASTICIDAD
 # =========================================================
 st.subheader("📈 Elasticidad-precio por zona (escenario actual)")
 st.caption("Elasticidad propia = β_precio × (precio/1000) × (1 − cuota). "
-           "Valores entre 0 y −1 = inelástico (tolera subidas); menor a −1 = elástico (sensible).")
-
+           "Entre 0 y −1 = inelástica; menor a −1 = elástica.")
 df_elast = pd.DataFrame({
     'Zona': list(elasticidades.keys()),
     'Precio actual': [f"${v:,}" for v in [p_vip, p_prem, p_est, p_econ]],
@@ -187,24 +203,21 @@ st.dataframe(df_elast, use_container_width=True, hide_index=True)
 st.markdown("---")
 
 # =========================================================
-# MATRIZ DE PRECIOS: evalua combinaciones dentro del rango seguro
-# y rankea por ingreso de taquilla (con tope de capacidad)
+# MATRIZ DE PRECIOS
 # =========================================================
 st.subheader("🧮 Matriz de precios — combinaciones óptimas")
-st.caption("Evalúa 81 combinaciones (3 niveles × 4 zonas) dentro del rango de la encuesta, "
-           "con el rival seleccionado, y las ordena por ingreso de taquilla.")
+st.caption("81 combinaciones (3 niveles × 4 zonas) dentro del rango de la encuesta, "
+           "con el escenario seleccionado (rival, día, F&B), ordenadas por ingreso de taquilla.")
 
-def construir_matriz(rival_top):
+def construir_matriz(rival, finde, fb_on):
     niveles = {
-        'VIP':       [2499, 3749, 4999],
-        'Premium':   [1499, 2499, 3499],
-        'Estándar':  [349, 574, 799],
-        'Económica': [49, 174, 299],
+        'VIP': [2499, 3749, 4999], 'Premium': [1499, 2499, 3499],
+        'Estándar': [349, 574, 799], 'Económica': [49, 174, 299],
     }
     filas = []
     for pv, pp, pe, pc in itertools.product(niveles['VIP'], niveles['Premium'],
                                             niveles['Estándar'], niveles['Económica']):
-        _, _, asis, asis_tot, _, ing, elas = simular(pv, pp, pe, pc, rival_top)
+        _, _, _, asis_tot, _, ing, _ = simular(pv, pp, pe, pc, rival, finde, fb_on)
         filas.append({
             'VIP': pv, 'Premium': pp, 'Estándar': pe, 'Económica': pc,
             'Ingreso ($M)': round(ing / 1e6, 2),
@@ -213,7 +226,7 @@ def construir_matriz(rival_top):
         })
     return pd.DataFrame(filas).sort_values('Ingreso ($M)', ascending=False).reset_index(drop=True)
 
-df_matriz = construir_matriz(rival_top)
+df_matriz = construir_matriz(rival, finde, fb_on)
 st.dataframe(df_matriz.head(10), use_container_width=True, hide_index=True)
 
 mejor = df_matriz.iloc[0]
@@ -223,29 +236,46 @@ st.success(
     f"Estándar ${int(mejor['Estándar'])} · Económica ${int(mejor['Económica'])} "
     f"→ ${mejor['Ingreso ($M)']}M con {mejor['Ocupación %']}% de ocupación."
 )
-st.caption("⚠️ Maximiza ingreso de **taquilla**. El club prioriza aforo porque el ingreso "
-           "secundario (alimentos, mercancía, patrocinios) depende del volumen de asistentes; "
-           "considera ese objetivo al elegir entre filas de ingreso similar pero distinta ocupación.")
+st.caption("⚠️ Maximiza ingreso de taquilla. El club prioriza aforo porque el ingreso "
+           "secundario (alimentos, mercancía, patrocinios) depende del volumen; pondéralo "
+           "al elegir entre filas de ingreso similar y distinta ocupación.")
 
 st.markdown("---")
 
 # =========================================================
-# NOTA METODOLOGICA (defendible ante el board / profesores)
+# NOTA METODOLÓGICA
 # =========================================================
-with st.expander("📋 Nota metodológica — qué hay detrás de estos números"):
-    st.markdown(f"""
-- **Modelo:** Choice-Based Conjoint estimado en Biogeme (`HB_Capitanes_Real_4Zonas`),
-  {MODELO_INFO['n_obs']} elecciones observadas.
-- **Validación:** {MODELO_INFO['rho2_nota']}.
-- **Atributos estimados:** Zona (VIP / Premium / Estándar / Económica-base),
-  Precio y Rival (Top vs. No-Top).
-- **Disposición a pagar (WTP) estimada:** VIP $676 · Premium $646 · Estándar $1,650 · Rival Top $484.
-  La zona Estándar concentra la mayor disposición a pagar.
-- **Alcance:** se usan las **medias poblacionales** del modelo. La heterogeneidad individual
-  (componente jerárquico/Bayes) no convergió con 1,000 draws y queda como trabajo futuro;
-  requiere más draws de Monte Carlo.
-- **No incluido:** día de la semana y paquetes de alimentos/bebidas **no se estimaron**
-  en este modelo, por lo que no forman parte del simulador.
-- **Rango seguro:** los precios se mantienen dentro del rango evaluado en la encuesta;
-  fuera de él el modelo extrapolaría sin respaldo de datos.
+with st.expander("📋 Nota metodológica y significancia estadística"):
+    st.markdown("""
+**Modelo:** Choice-Based Conjoint estimado en Biogeme (`HB_Capitanes_Ampliado`),
+1,170 elecciones observadas. Se usan las medias poblacionales (la heterogeneidad
+individual no convergió con 1,000 draws; queda como trabajo futuro).
+
+**Validación:** accuracy holdout ≈ 45% (azar con 4 opciones = 25%).
+
+**Significancia de cada atributo (p-valor robusto, 95%):**
+
+| Atributo | p-valor | ¿Significativo? |
+|---|---|---|
+| Precio | 0.00002 | ✅ Sí |
+| Zona Estándar | 0.00008 | ✅ Sí |
+| Constante No-compra | 0.00006 | ✅ Sí |
+| Rival Lakers | 0.113 | ❌ No |
+| Paquete F&B | 0.177 | ❌ No |
+| Zona Premium | 0.539 | ❌ No |
+| Zona VIP | 0.639 | ❌ No |
+| Rival Hustle | 0.751 | ❌ No |
+| Día fin de semana | 0.823 | ❌ No |
+
+**Interpretación de negocio:** para los fans de Capitanes en esta muestra, el **precio**
+y el **salto a la zona Estándar** son los únicos drivers estadísticamente determinantes.
+El día de la semana, el paquete F&B y el rival específico no mostraron un efecto
+significativo al 95%; confirmarlos requeriría ampliar el tamaño de muestra en el fieldwork.
+El resultado se mantiene estable al añadir más respuestas, lo que indica robustez y no
+un artefacto de muestreo.
+
+**WTP estimada (MXN):** VIP $421 · Premium $356 · Estándar $1,631 · Rival Lakers $451 ·
+Rival Hustle $75 · Día finde $60 · Paquete F&B $443.
+
+**No extrapolar:** los precios se mantienen dentro del rango evaluado en la encuesta.
 """)
