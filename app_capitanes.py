@@ -254,13 +254,16 @@ st.markdown("---")
 # MATRIZ DE PRECIOS
 # =========================================================
 st.subheader("🧮 Matriz de precios — combinaciones óptimas")
-st.caption("81 combinaciones (3 niveles × 4 zonas) dentro del rango de la encuesta, "
-           "con el escenario seleccionado (rival, día, F&B), ordenadas por ingreso de taquilla.")
+st.caption("Rejilla fina de precios dentro del rango de la encuesta, "
+           "con el escenario seleccionado (rival, día, F&B), ordenada por ingreso de taquilla.")
 
 def construir_matriz(rival, finde, fb_on):
+    # Rejilla fina (mismos pasos que la presentación): VIP/Premium $250, Estándar $75, Económica $50
     niveles = {
-        'VIP': [2499, 3749, 4999], 'Premium': [1499, 2499, 3499],
-        'Estándar': [349, 574, 799], 'Económica': [49, 174, 299],
+        'VIP': list(range(2499, 5000, 250)),
+        'Premium': list(range(1499, 3500, 250)),
+        'Estándar': list(range(349, 800, 75)),
+        'Económica': list(range(49, 300, 50)),
     }
     filas = []
     for pv, pp, pe, pc in itertools.product(niveles['VIP'], niveles['Premium'],
